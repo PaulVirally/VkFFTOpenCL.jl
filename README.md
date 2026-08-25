@@ -1,12 +1,11 @@
 # VkFFTOpenCL.jl
 
 Runs [VkFFT](https://github.com/DTolm/VkFFT) on `CLArray`s by loading VkFFT.jl
-with its OpenCL backend. That is all this package does: it depends on OpenCL and
-VkFFT, which is what activates VkFFT's OpenCL extension, and re-exports VkFFT so
-you only need `using VkFFTOpenCL`.
+with its OpenCL backend. This package simply activates VkFFT's OpenCL extension,
+and re-exports VkFFT.
 
 ```julia
-using VkFFTOpenCL, LinearAlgebra
+using VkFFTOpenCL, OpenCL, LinearAlgebra
 
 x = CLArray{ComplexF32}(undef, 1024, 64)
 copyto!(x, rand(ComplexF32, 1024, 64))
