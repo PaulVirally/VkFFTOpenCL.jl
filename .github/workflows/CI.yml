@@ -1,0 +1,183 @@
+# pocl gives a CPU OpenCL device that needs no GPU hardware, so this job plans
+# and applies real transforms rather than only loading the package. What it
+# checks is that a project whose only direct dependency is VkFFTOpenCL can
+# transform an array, with no OpenCL.jl and no VkFFT added by hand.
+#
+# The ground truth is analytic on purpose. The transform of a delta is flat and
+# the inverse brings the delta back, so there is no FFTW here and no second
+# implementation to disagree with.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # VkFFT is not in the General registry yet, so Pkg cannot resolve the
+  # dependency in Project.toml and the workflow has to hand it a copy. The
+  # checkout step and the Pkg.develop line that use these both come out once
+  # VkFFT is registered.
+  #
+  # libvkfft is the C wrapper. There is no JLL for it yet either, so the OpenCL
+  # build happens here. Both refs float, so a change on either side that breaks
+  # this package shows up now rather than after the next release. Put a full 40
+  # character commit hash in to make a run reproducible. Whatever these name
+  # has to be pushed, since nothing local is visible from a runner.
+  VKFFT_JL_REPOSITORY: PaulVirally/VkFFT.jl
+  VKFFT_JL_REF: main
+  LIBVKFFT_REPOSITORY: PaulVirally/libvkfft
+  LIBVKFFT_REF: main
+
+jobs:
+  opencl:
+    # Julia 1 only. VkFFT.jl's own workflow exercises the 1.10 compat floor
+    # across the whole suite.
+    name: Julia 1 - ubuntu-latest - OpenCL on pocl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check out VkFFT.jl
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.VKFFT_JL_REPOSITORY }}
+          ref: ${{ env.VKFFT_JL_REF }}
+          path: vkfft
+
+      # VkFFT is a pinned submodule of libvkfft at lib/VkFFT and its
+      # CMakeLists.txt fails outright when lib/VkFFT/vkFFT/vkFFT.h is missing,
+      # so this checkout has to be recursive.
+      - name: Check out libvkfft
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.LIBVKFFT_REPOSITORY }}
+          ref: ${{ env.LIBVKFFT_REF }}
+          path: libvkfft
+          submodules: recursive
+
+      # pocl-opencl-icd is deliberately absent. The device comes from pocl_jll,
+      # and apt's pocl would register a second driver in /etc/OpenCL/vendors,
+      # leaving which one runs up to platform ordering.
+      - name: Install the OpenCL headers and an ICD loader
+        run: |
+          set -o pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            opencl-headers ocl-icd-opencl-dev
+
+      # Backend 3 is OpenCL. The wrapper is handed OpenCL objects created by
+      # OpenCL.jl's own loader and reaches the driver through the dispatch
+      # table each object carries, so it has to link against an ICD loader
+      # rather than against a driver.
+      - name: Build the wrapper for backend 3
+        run: |
+          set -o pipefail
+          cmake -S libvkfft -B libvkfft/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVKFFT_BACKEND=3 \
+            -DVKFFT_WRAPPER_BUILD_TESTS=OFF
+          cmake --build libvkfft/build --parallel
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+
+      - uses: julia-actions/cache@v2
+
+      # OpenCL is not added here. It arrives as a dependency of this package,
+      # which is part of what the script checks. pocl_jll is added because
+      # nothing else would bring a driver.
+      - name: Resolve a project holding VkFFT and VkFFTOpenCL
+        run: |
+          using Pkg
+          Pkg.develop([PackageSpec(path=joinpath(ENV["GITHUB_WORKSPACE"], "vkfft")),
+                       PackageSpec(path=ENV["GITHUB_WORKSPACE"])])
+          Pkg.add(["Preferences", "UUIDs", "pocl_jll"])
+          Pkg.precompile()
+        shell: julia --color=yes {0}
+        env:
+          JULIA_PROJECT: ${{ runner.temp }}/openclenv
+
+      # Two things about the order below are load bearing. The libvkfft_path
+      # preference is set before VkFFT is loaded, because VkFFT reads it in
+      # __init__. And pocl_jll is loaded before anything touches the OpenCL
+      # API, because OpenCL.jl builds its driver list on the first call and
+      # caches it, so a driver loaded after that call is never seen.
+      #
+      # The memory backend goes through task local storage rather than through
+      # OpenCL.jl's preference. That preference cannot be set from here anyway,
+      # since Preferences resolves a bare UUID through the active project's
+      # direct dependencies and OpenCL is deliberately not one of them.
+      - name: Run the trigger gate
+        run: |
+          using Preferences
+          using UUIDs
+
+          set_preferences!(UUID("65dc4606-9ae3-4b78-8734-204937373618"), "libvkfft_path" => ENV["VKFFT_WRAPPER_PATH"]; force=true)
+
+          using pocl_jll
+          using VkFFTOpenCL
+
+          const cl = VkFFTOpenCL.OpenCL.cl
+          const CLArray = VkFFTOpenCL.OpenCL.CLArray
+          const DeviceArray{T, N} = CLArray{T, N, cl.Buffer}
+
+          task_local_storage(:CLMemoryBackend, cl.BufferBackend())
+
+          failures = 0
+
+          function check(name::String, ok::Bool)
+              global failures += ok ? 0 : 1
+              println(ok ? "[PASS] " : "[FAIL] ", name)
+              return ok
+          end
+
+          println("platform: ", cl.platform().name, ", device: ", cl.device().name)
+          println("wrapper: ", ENV["VKFFT_WRAPPER_PATH"])
+
+          n = 256
+          batch = 4
+
+          check("OpenCL extension active", Base.get_extension(VkFFT, :VkFFTOpenCLExt) !== nothing)
+          check("backend tag", VkFFT._backend(DeviceArray{ComplexF32, 1}) === Val(:opencl))
+          check("OpenCL wrapper", VkFFT._backend_id() == 3)
+
+          host = zeros(ComplexF32, n, batch)
+          host[1, :] .= 1
+
+          x = DeviceArray{ComplexF32, 2}(undef, (n, batch))
+          copyto!(x, host)
+
+          forward = VkFFT.plan_fft(x, 1)
+          check("plan type", forward isa VkFFTPlan{ComplexF32, 2, false, :opencl, 1})
+
+          spectrum = Array(forward * x)
+          check("delta transforms flat", maximum(abs.(spectrum .- 1)) < 1e-5)
+
+          y = forward * x
+          back = Array(inv(forward) * y)
+          check("round trip", maximum(abs.(back .- host)) < 1e-5)
+
+          r = DeviceArray{Float32, 1}(undef, n)
+          copyto!(r, ones(Float32, n))
+          rspectrum = Array(VkFFT.plan_rfft(r, 1) * r)
+          check("rfft of a constant", abs(rspectrum[1] - n) < 1e-3 && maximum(abs.(rspectrum[2:end])) < 1e-3)
+
+          println(failures == 0 ? "trigger package OK" : "$failures trigger checks failed")
+          exit(failures == 0 ? 0 : 1)
+        shell: julia --color=yes {0}
+        env:
+          JULIA_PROJECT: ${{ runner.temp }}/openclenv
+          VKFFT_WRAPPER_PATH: ${{ github.workspace }}/libvkfft/build/libvkfft.so
