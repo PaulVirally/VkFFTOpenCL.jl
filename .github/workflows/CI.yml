@@ -94,7 +94,7 @@ jobs:
         with:
           version: "1"
 
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
 
       # OpenCL is not added here. It arrives as a dependency of this package,
       # which is part of what the script checks. pocl_jll is added because
