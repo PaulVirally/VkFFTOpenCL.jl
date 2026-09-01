@@ -47,10 +47,10 @@ jobs:
     name: Julia 1 - ubuntu-latest - OpenCL on pocl
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Check out VkFFT.jl
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.VKFFT_JL_REPOSITORY }}
           ref: ${{ env.VKFFT_JL_REF }}
@@ -60,7 +60,7 @@ jobs:
       # CMakeLists.txt fails outright when lib/VkFFT/vkFFT/vkFFT.h is missing,
       # so this checkout has to be recursive.
       - name: Check out libvkfft
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.LIBVKFFT_REPOSITORY }}
           ref: ${{ env.LIBVKFFT_REF }}
