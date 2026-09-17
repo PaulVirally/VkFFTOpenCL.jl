@@ -4,6 +4,11 @@ using OpenCL
 using Reexport
 @reexport using VkFFT
 
+# Nothing here refers to a name from the JLL, but VkFFTOpenCLExt lists it as a
+# trigger alongside OpenCL, and a trigger has to be loaded rather than merely
+# listed as a dependency for the extension to activate.
+import VkFFT_OpenCL_jll
+
 """
     __init__()
 
