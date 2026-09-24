@@ -12,6 +12,15 @@ VkFFT_OpenCL_jll = "4b94af74-5903-5048-b3a4-075b7d965b91"
 [compat]
 OpenCL = "0.10"
 Reexport = "1"
+Test = "1"
 VkFFT = "0.1"
 VkFFT_OpenCL_jll = "0.1"
 julia = "1.10"
+pocl_jll = "6, 7"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+pocl_jll = "627d6b7a-bbe6-5189-83e7-98cc0a5aeadd"
+
+[targets]
+test = ["Test", "pocl_jll"]
