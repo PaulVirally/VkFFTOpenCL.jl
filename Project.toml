@@ -1,7 +1,7 @@
 name = "VkFFTOpenCL"
 uuid = "fba9c59f-ccfc-4e1f-a32c-0e043c1e2a5f"
-authors = ["Paul Virally"]
 version = "0.1.0"
+authors = ["Paul Virally"]
 
 [deps]
 OpenCL = "08131aa3-fb12-5dee-8b74-c09406e224a2"
@@ -10,7 +10,7 @@ VkFFT = "65dc4606-9ae3-4b78-8734-204937373618"
 VkFFT_OpenCL_jll = "4b94af74-5903-5048-b3a4-075b7d965b91"
 
 [compat]
-OpenCL = "0.10"
+OpenCL = "0.10, 1"
 Reexport = "1"
 Test = "1"
 VkFFT = "0.1"
